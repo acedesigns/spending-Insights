@@ -282,24 +282,6 @@ zero width/height — that's `jsdom` not doing real layout, not an application b
 tests assert on the chart's accessible label and surrounding DOM rather than on pixel
 output.
 
-## Known trade-offs / what I'd do next with more time
-
-- **Bundle size**: the production bundle is ~175 KB gzipped, mostly Recharts. I'd
-  code-split the charts behind `React.lazy` if this were shipping, rather than in a
-  take-home.
-- **Date range picker**: the brief calls for a dashboard, not a full statement
-  browser, so I scoped filtering to "pick a month" plus search/category/account/type
-  filters rather than an arbitrary date-range picker — that's the next natural filter
-  to add.
-- **Currency**: hard-coded to ZAR to match the brief's "customer" framing and my own
-  market (South Africa). A real version would take the account's currency from the
-  API response.
-- **Auth / empty-account states**: not modelled — this assumes a single already-
-  authenticated customer with data, per the brief.
-- **Stale test file**: `src/__tests__/App.test.tsx` still targets the pre-router
-  `App.tsx` composition root from before the migration to `routes/DashBoardPage.tsx`
-  loaders; both `App.tsx` and that test are dead weight now and should be deleted
-  rather than updated, since the route now owns that behaviour.
 
 ## Author
 
