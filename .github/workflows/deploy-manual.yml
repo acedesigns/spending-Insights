@@ -1,0 +1,31 @@
+# Equivalent of Bitbucket's `custom:` pipelines (deploy-to-dev, deploy-to-uat,
+# deploy-to-metav, deploy-to-metavp). One workflow with an environment picker
+# instead of four near-identical pipelines. Trigger it from the Actions tab →
+# "Manual Deploy" → Run workflow → choose environment + branch/ref.
+
+name: Manual Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - test        # was: deploy-to-dev
+          - staging     # was: deploy-to-uat
+          - MetaV       # was: deploy-to-metav
+          - MetaVProd   # was: deploy-to-metavp
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/build-deploy.yml
+    with:
+      environment: ${{ inputs.environment }}
+      run-semantic-release: false
+    secrets: inherit

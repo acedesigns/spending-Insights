@@ -1,0 +1,86 @@
+# Equivalent of the Bitbucket `branches: develop:` pipeline.
+#   1. Push/merge to develop → auto build & deploy to DEV (environment: test)
+#   2. "Release to STAGING" — in Bitbucket this was `trigger: manual`.
+#      GitHub Actions has no manual step inside a running workflow; the
+#      idiomatic equivalent is an environment with **required reviewers**.
+#      Create an environment called `release-gate` (Settings → Environments),
+#      add yourself as a required reviewer, and the release job will pause
+#      until someone approves it — same UX as Bitbucket's paused step.
+
+name: Develop
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: develop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    name: Deploy to DEV
+    uses: ./.github/workflows/build-deploy.yml
+    with:
+      environment: test
+      run-semantic-release: true
+    secrets: inherit
+
+  release-to-staging:
+    name: Release to STAGING (GitFlow merge to main)
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    environment: release-gate   # pauses here until a reviewer approves
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0                    # was: clone: depth: full
+          token: ${{ secrets.RELEASE_PAT }} # see note below
+          ref: develop
+
+      - name: Configure git identity
+        run: |
+          git config user.name "release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+
+      - name: GitFlow release merge
+        env:
+          GIT_MERGE_AUTOEDIT: "no"
+        run: |
+          appName=$(node -pe "require('./package.json').name")
+          echo "Starting new release for $appName"
+
+          git checkout develop
+          git pull
+          version=$(node -pe "require('./package.json').version")
+
+          git checkout -b "release/$version"
+
+          git checkout main
+          git pull
+          git merge --no-ff "release/$version"
+          git push
+
+          git checkout develop
+          git pull
+          git merge --no-ff "release/$version"
+          git push
+
+          git branch -d "release/$version"
+          echo "Release successful"
+
+# ── Why RELEASE_PAT and not GITHUB_TOKEN? ────────────────────────────────────
+# Two reasons:
+#   1. Pushes made with the default GITHUB_TOKEN do NOT trigger other
+#      workflows (loop protection). The whole point of this job is that the
+#      push to main triggers main.yml → Deploy to UAT. That only happens if
+#      the push uses a PAT (classic or fine-grained with contents:write) or
+#      a GitHub App token.
+#   2. If main is a protected branch, GITHUB_TOKEN usually can't push to it.
+# Create a fine-grained PAT (or GitHub App), store it as the repo secret
+# RELEASE_PAT, and allow it to bypass main's branch protection.

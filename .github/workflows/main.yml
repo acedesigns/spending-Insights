@@ -1,0 +1,26 @@
+# Equivalent of the Bitbucket `branches: main:` pipeline.
+# Push/merge to main (including the automated GitFlow merge from develop.yml)
+# → auto build & deploy to UAT (environment: staging).
+
+name: Main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: main-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-uat:
+    name: Deploy to UAT
+    uses: ./.github/workflows/build-deploy.yml
+    with:
+      environment: staging
+      run-semantic-release: false
+    secrets: inherit

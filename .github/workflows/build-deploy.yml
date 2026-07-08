@@ -1,0 +1,92 @@
+# Reusable workflow — the equivalent of the Bitbucket `&build` YAML anchor.
+# Every environment (test / staging / MetaV / MetaVProd) calls this same
+# workflow and only the `environment` input changes. Environment-specific
+# values (S3_BUCKET, CLOUDFRONT_DIST, VITE_APP_API_HOST, ...) live in
+# GitHub Environments: Settings → Environments → <name> → variables/secrets.
+
+name: Build & Deploy (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "GitHub Environment to deploy to (test, staging, MetaV, MetaVProd)"
+        required: true
+        type: string
+      run-semantic-release:
+        description: "Whether to run semantic-release (usually only on develop)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # semantic-release pushes tags + changelog
+  id-token: write   # OIDC federation with AWS (no long-lived keys)
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}   # scopes vars/secrets + shows deployment history
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # semantic-release needs full history + tags
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn           # replaces Bitbucket's `caches: - node`
+
+      - name: Install dependencies
+        run: yarn --frozen-lockfile
+
+      - name: Semantic release
+        if: ${{ inputs.run-semantic-release }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
+
+      # NOTE: the Bitbucket pipeline echoed VITE_APP_GRAPHQL_SECRET into the
+      # build log — deliberately not reproduced here. GitHub masks secrets in
+      # logs, but printing them is still bad practice.
+
+      - name: GraphQL codegen
+        env:
+          VITE_APP_API_HOST: ${{ vars.VITE_APP_API_HOST }}
+          VITE_APP_GRAPHQL_SECRET: ${{ secrets.VITE_APP_GRAPHQL_SECRET }}
+        run: yarn generate
+
+      - name: Build
+        env:
+          VITE_APP_API_HOST: ${{ vars.VITE_APP_API_HOST }}
+          VITE_APP_GRAPHQL_SECRET: ${{ secrets.VITE_APP_GRAPHQL_SECRET }}
+        run: yarn build
+
+      # Preferred: OIDC role assumption — no AWS keys stored in GitHub.
+      # Create an IAM role trusting GitHub's OIDC provider and put its ARN
+      # in the environment variable AWS_ROLE_ARN.
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Fallback if you can't use OIDC yet — comment the block above and
+      # uncomment this one, storing keys as environment secrets:
+      # - name: Configure AWS credentials (access keys)
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Sync to S3
+        run: aws s3 sync --delete dist "s3://${{ vars.S3_BUCKET }}"
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ vars.CLOUDFRONT_DIST }}" \
+            --paths "/*"
