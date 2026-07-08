@@ -51,4 +51,55 @@ describe("useSpendingData", () => {
     expect(result.current.error).toBeNull();
     expect(result.current.data).toEqual(snapshot);
   });
+
+  it("falls back to a generic message when the rejection isn't an Error instance", async () => {
+    vi.spyOn(spendingService, "fetchSpendingSnapshot").mockRejectedValue("boom");
+
+    const { result } = renderHook(() => useSpendingData());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.error).toBe("Something went wrong.");
+  });
+
+  it("ignores a late resolve after the component has unmounted", async () => {
+    let resolveFetch!: (snapshot: spendingService.SpendingSnapshot) => void;
+    vi.spyOn(spendingService, "fetchSpendingSnapshot").mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = renderHook(() => useSpendingData());
+    unmount();
+
+    await act(async () => {
+      resolveFetch({ accounts: [], transactions: [], asOf: "2026-06-30" });
+      await Promise.resolve();
+    });
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("ignores a late rejection after the component has unmounted", async () => {
+    let rejectFetch!: (err: Error) => void;
+    vi.spyOn(spendingService, "fetchSpendingSnapshot").mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectFetch = reject;
+      }),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = renderHook(() => useSpendingData());
+    unmount();
+
+    await act(async () => {
+      rejectFetch(new Error("too late"));
+      await Promise.resolve();
+    });
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
 });

@@ -10,9 +10,10 @@
 import React from 'react'
 
 const App = (): React.JSX.Element => {
-  console.log('Silence is golden')
 
-  return (<></>)
+    console.log('Silence is golden')
+
+    return (<></>)
 
 }
 
